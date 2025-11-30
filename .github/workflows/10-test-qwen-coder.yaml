@@ -40,7 +40,8 @@ jobs:
           # pip3 install yq
           YQ_VERSION=v4.40.5 
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64 -O /usr/bin/yq
-          chmod +x /usr/bin/yq
+          # Add 'sudo' to chmod to ensure execute permission is granted
+          sudo chmod +x /usr/bin/yq
 
       - name: Get Issue Details
         env:
