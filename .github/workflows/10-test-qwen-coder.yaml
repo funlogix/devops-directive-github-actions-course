@@ -44,29 +44,25 @@ jobs:
           if [ "${{ github.event_name }}" = "issues" ]; then
             echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
             echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
-            {
-              echo "ISSUE_BODY<<EOF"
-              echo "${{ github.event.issue.body }}"
-              echo "EOF"
-            } >> "$GITHUB_ENV"
-            {
-              echo "TEXT_INPUT<<EOF"
-              echo "${{ github.event.issue.body }}"
-              echo "EOF"
-            } >> "$GITHUB_ENV"
-          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
-            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
-            echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
-            {
-              echo "ISSUE_BODY<<EOF"
-              echo "${{ github.event.issue.body }}"
-              echo "EOF"
-            } >> "$GITHUB_ENV"
-            {
-              echo "TEXT_INPUT<<EOF"
-              echo "${{ github.event.comment.body }}"
-              echo "EOF"
-            } >> "$GITHUB_ENV"
+            cat >> "$GITHUB_ENV" <<EOF
+            ISSUE_BODY<<EOF
+            ${{ github.event.issue.body }}
+            EOF
+            TEXT_INPUT<<EOF
+            ${{ github.event.issue.body }}
+            EOF
+            EOF
+                elif [ "${{ github.event_name }}" = "issue_comment" ]; then
+                  echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
+                  echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
+                  cat >> "$GITHUB_ENV" <<EOF
+            ISSUE_BODY<<EOF
+            ${{ github.event.issue.body }}
+            EOF
+            TEXT_INPUT<<EOF
+            ${{ github.event.comment.body }}
+            EOF
+            EOF
           fi
 
 
