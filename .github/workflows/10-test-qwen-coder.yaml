@@ -1,0 +1,374 @@
+name: Qwen Code Issue Review
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  qwen-review:
+    runs-on: ubuntu-latest
+    # Avoid duplicate triggers from bots or maintainers
+    if: |
+      (github.event_name == 'issues') ||
+      (github.event_name == 'issue_comment' && 
+       github.event.comment.user.type != 'Bot' &&
+       github.event.comment.author_association != 'MEMBER' &&
+       github.event.comment.author_association != 'OWNER')
+
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MODEL: qwen/qwen3-coder:free
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y jq
+          pip3 install yq
+
+      - name: Get Issue Details
+        run: |
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
+            echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
+            echo "ISSUE_BODY=${{ github.event.issue.body }}" >> "$GITHUB_ENV"
+            TEXT_INPUT="${{ github.event.issue.body }}"
+          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
+            echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
+            echo "ISSUE_BODY=${{ github.event.issue.body }}" >> "$GITHUB_ENV"
+            TEXT_INPUT="${{ github.event.comment.body }}"
+          fi
+          echo "TEXT_INPUT<<EOF" >> "$GITHUB_ENV"
+          echo "$TEXT_INPUT" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: Detect Qwen Command (Dry-run vs Apply)
+        run: |
+          if echo "$TEXT_INPUT" | grep -Eiq '\[qwen[[:space:]]+apply\]'; then
+            echo "DRY_RUN=false" >> "$GITHUB_ENV"
+            echo "MODE=apply" >> "$GITHUB_ENV"
+          elif echo "$TEXT_INPUT" | grep -Eiq '\[qwen[[:space:]]+dry-run\]'; then
+            echo "DRY_RUN=true" >> "$GITHUB_ENV"
+            echo "MODE=dry-run" >> "$GITHUB_ENV"
+          else
+            echo "DRY_RUN=true" >> "$GITHUB_ENV"
+            echo "MODE=default (dry-run)" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fetch Issue Comments (last 5)
+        run: |
+          gh issue view ${{ env.ISSUE_NUMBER }} --json comments \
+            --jq '[.comments[-5:][] | "- **\(.author.login)**: \(.body | split("\n") | join(" "))"] | join("\n")' \
+            > /tmp/comments.txt
+
+      - name: Gather Repo Context (Key Files)
+        run: |
+          {
+            echo "Repository: ${{ env.REPO }}"
+            echo "Issue: #${{ env.ISSUE_NUMBER }} - ${{ env.ISSUE_TITLE }}"
+            echo ""
+            # Include common doc and config files
+            for f in README*.md package.json pyproject.toml .gitignore LICENSE; do
+              if [ -f "$f" ]; then
+                echo "=== $f ==="
+                cat "$f"
+                echo ""
+              fi
+            done
+            # Also list src/ or lib/ if small
+            if [ -d src ] && [ $(find src -type f | wc -l) -le 10 ]; then
+              echo "=== src/ (sample) ==="
+              find src -type f | head -n 5
+            fi
+            if [ -d lib ] && [ $(find lib -type f | wc -l) -le 10 ]; then
+              echo "=== lib/ (sample) ==="
+              find lib -type f | head -n 5
+            fi
+          } > /tmp/repo-context.txt
+
+      - name: Construct Prompt
+        run: |
+          cat > /tmp/prompt.txt << 'EOF'
+          You are Qwen3-Coder, an expert AI developer assistant. Review the GitHub issue below and propose a minimal, safe, and concrete solution.
+
+          **Rules:**
+          - Only propose changes if they are **simple, low-risk, and self-contained** (e.g., docs, config, minor fix).
+          - **Do not** propose:
+            - New dependencies
+            - Core logic changes without clear specs
+            - Multi-step refactorings
+            - Files that don’t exist
+          - You may modify **multiple files** if needed (e.g., README + example).
+          - **Be precise**: output **exact file content**, not patches.
+
+          **Output Format (STRICT YAML):**
+          FEASIBLE: true
+          FILES:
+          - FILE: "path/to/file1.ext"
+            OLD: |
+              <exact current content>
+            NEW: |
+              <exact new content>
+          - FILE: "path/to/file2.ext"
+            OLD: |
+              ...
+            NEW: |
+              ...
+          SUMMARY: "<1-2 sentence explanation>"
+
+          OR
+
+          FEASIBLE: false
+          REASON: "<clear explanation>"
+
+          **Issue:**
+          Title: "${ISSUE_TITLE}"
+          Body: "${ISSUE_BODY}"
+          Comments: |
+          $(cat /tmp/comments.txt)
+
+          **Repository Context:**
+          $(cat /tmp/repo-context.txt)
+          EOF
+
+          envsubst < /tmp/prompt.txt > /tmp/final-prompt.txt
+
+      - name: Call Qwen3-Coder via OpenRouter
+        run: |
+          PROMPT=$(cat /tmp/final-prompt.txt)
+
+          # Build JSON payload safely with jq to escape newlines/quotes
+          PAYLOAD=$(jq -n --arg model "${MODEL}" --arg prompt "$PROMPT" \
+            '{model: $model, messages: [{role: "user", content: $prompt}]}')
+
+          RESPONSE=$(echo "$PAYLOAD" | curl -s --max-time 60 https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer ${{ secrets.OPENROUTER_API_KEY }}" \
+            -H "HTTP-Referer: https://github.com/${{ github.repository }}" \
+            -H "X-Title: Qwen Issue Review" \
+            -H "Content-Type: application/json" \
+            -d @-)
+
+          echo "$RESPONSE" > /tmp/raw.json
+
+          CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+
+          if [ -z "$CONTENT" ]; then
+            echo "❌ No response from model (quota/API error)"
+            echo "Raw response (truncated):"
+            echo "$RESPONSE" | head -n 20
+            exit 1
+          fi
+
+          echo "$CONTENT" > /tmp/response.txt
+
+      - name: Parse Model Response
+        id: parse
+        run: |
+          RESP=/tmp/response.txt
+
+          # Validate response contains FEASIBLE key
+          if ! grep -q "^FEASIBLE:" "$RESP"; then
+            echo "❌ Invalid response format: missing FEASIBLE key"
+            echo "Raw response:"
+            cat "$RESP"
+            exit 1
+          fi
+
+          # Use yq for YAML parsing
+          FEASIBLE=$(yq -r '.FEASIBLE' "$RESP" 2>/dev/null || echo "error")
+          if [ "$FEASIBLE" = "error" ] || [ -z "$FEASIBLE" ]; then
+            echo "❌ Could not parse FEASIBLE value"
+            cat "$RESP"
+            exit 1
+          fi
+
+          if [ "$FEASIBLE" = "false" ]; then
+            echo "FEASIBLE=false" >> "$GITHUB_ENV"
+            REASON=$(yq -r '.REASON' "$RESP" 2>/dev/null || echo "")
+            if [ -z "$REASON" ]; then
+              echo "❌ Missing REASON field in infeasible response"
+              cat "$RESP"
+              exit 1
+            fi
+            echo "REASON<<EOF" >> "$GITHUB_ENV"
+            echo "$REASON" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+
+          elif [ "$FEASIBLE" = "true" ]; then
+            echo "FEASIBLE=true" >> "$GITHUB_ENV"
+            SUMMARY=$(yq -r '.SUMMARY' "$RESP" 2>/dev/null || echo "")
+            if [ -z "$SUMMARY" ]; then
+              echo "❌ Missing SUMMARY field in feasible response"
+              cat "$RESP"
+              exit 1
+            fi
+            echo "SUMMARY<<EOF" >> "$GITHUB_ENV"
+            echo "$SUMMARY" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+
+            # Extract FILES block as JSON
+            FILES_JSON=$(yq -o=json '.FILES' "$RESP" 2>/dev/null || echo "")
+            if [ -z "$FILES_JSON" ] || [ "$FILES_JSON" = "null" ]; then
+              echo "❌ No FILES block found in feasible response"
+              cat "$RESP"
+              exit 1
+            fi
+            echo "$FILES_JSON" > /tmp/files.json
+
+            # Validate files exist and OLD matches current content
+            python3 - <<'PYCODE'
+          import json, os, sys
+          files = json.load(open('/tmp/files.json'))
+          for f in files:
+              path = f.get("FILE") or f.get("file")
+              old = f.get("OLD") or ""
+              new = f.get("NEW") or ""
+              if not path:
+                  sys.exit("❌ Missing FILE path in entry")
+              if not os.path.exists(path):
+                  sys.exit(f"❌ File not found: {path}")
+              current = open(path).read().rstrip()
+              if current != old.rstrip():
+                  sys.exit(f"❌ Content mismatch in {path}")
+          print(f"✅ Parsed and validated {len(files)} files")
+          PYCODE
+
+                echo "FILES_JSON<<EOF" >> "$GITHUB_ENV"
+                cat /tmp/files.json >> "$GITHUB_ENV"
+                echo "EOF" >> "$GITHUB_ENV"
+
+              else
+                echo "❌ Unknown FEASIBLE value: $FEASIBLE"
+            cat "$RESP"
+            exit 1
+          fi
+
+
+      - name: Handle Infeasible Case
+        if: env.FEASIBLE == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ env.ISSUE_NUMBER }},
+              body: `🔍 **Qwen Code Review**\n\nNo automated solution could be proposed.\n\n**Reason:**\n> ${process.env.REASON}`
+            });
+
+      - name: Apply File Changes (Feasible)
+        if: env.FEASIBLE == 'true'
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys, shutil
+
+          try:
+              files = json.loads('''${{ env.FILES_JSON }}''')
+          except Exception as e:
+              sys.exit(f"❌ Failed to parse FILES_JSON: {e}")
+
+          if not isinstance(files, list):
+              sys.exit("❌ FILES_JSON is not a list")
+
+          for f in files:
+              path = f.get('file')
+              new_content = f.get('new')
+
+              if not path or new_content is None:
+                  sys.exit(f"❌ Missing required fields in entry: {f}")
+
+              if not os.path.exists(path):
+                  sys.exit(f"❌ Target file does not exist: {path}")
+
+              # Backup original file for safety
+              backup_path = path + ".bak"
+              shutil.copy(path, backup_path)
+              print(f"📦 Backed up {path} to {backup_path}")
+
+              # Write new content with UTF-8 encoding
+              try:
+                  with open(path, 'w', encoding='utf-8') as fp:
+                      fp.write(new_content)
+                  print(f"✅ Updated {path}")
+              except Exception as e:
+                  sys.exit(f"❌ Failed to update {path}: {e}")
+          PYCODE
+
+      - name: Create Pull Request (Apply Mode Only)
+        id: create-pull-request
+        if: env.FEASIBLE == 'true' && env.DRY_RUN == 'false'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "feat: auto-proposed fix for issue #${{ env.ISSUE_NUMBER }}"
+          branch: qwen/solution-issue-${{ env.ISSUE_NUMBER }}-${{ github.run_id }}
+          title: "Qwen: Proposed solution for issue #${{ env.ISSUE_NUMBER }}"
+          body: |
+            ## Automated Solution by Qwen Code (Qwen3-Coder)
+
+            **Summary**: ${{ env.SUMMARY }}
+
+            This PR was generated in response to issue #${{ env.ISSUE_NUMBER }}.
+
+            ---
+            *Powered by Qwen3-Coder via OpenRouter (free tier)*
+          delete-branch: true
+
+      - name: Prepare Comment
+        run: |
+          if [ "${{ env.FEASIBLE }}" = "true" ]; then
+            if [ "${{ env.DRY_RUN }}" = "true" ]; then
+              echo "✅ **Qwen Code (dry-run)** analyzed issue #${{ env.ISSUE_NUMBER }}:" > /tmp/comment.md
+              echo "" >> /tmp/comment.md
+              echo "**Summary**: ${{ env.SUMMARY }}" >> /tmp/comment.md
+              echo "" >> /tmp/comment.md
+              echo "**Proposed Changes (truncated if long)**:" >> /tmp/comment.md
+              echo '```json' >> /tmp/comment.md
+              # Pretty-print JSON, truncate to first 100 lines if very large
+              echo '${{ env.FILES_JSON }}' | jq -C . | head -n 100 >> /tmp/comment.md
+              echo '```' >> /tmp/comment.md
+              echo "" >> /tmp/comment.md
+              echo "> 💡 **To auto-create a PR**, comment: \`[qwen apply]\`" >> /tmp/comment.md
+            else
+              PR_NUM=${{ steps.create-pull-request.outputs.pull-request-number }}
+              if [ -n "$PR_NUM" ]; then
+                echo "✅ **Qwen Code** proposed a solution in PR #${PR_NUM}." > /tmp/comment.md
+                echo "" >> /tmp/comment.md
+                echo "**Summary**: ${{ env.SUMMARY }}" >> /tmp/comment.md
+                echo "" >> /tmp/comment.md
+                echo "Please review and merge if acceptable." >> /tmp/comment.md
+              fi
+            fi
+          else
+            echo "🔍 **Qwen Code Review**: No solution proposed." > /tmp/comment.md
+          fi
+
+      - name: Comment on Issue
+        if: env.FEASIBLE == 'true' || env.FEASIBLE == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/comment.md', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ env.ISSUE_NUMBER }},
+              body: body
+            });
