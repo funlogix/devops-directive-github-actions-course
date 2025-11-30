@@ -181,7 +181,7 @@ jobs:
 
           # Build JSON payload safely with jq to escape newlines/quotes
           PAYLOAD=$(jq -n --arg model "${MODEL}" --arg prompt "$PROMPT" \
-            '{model: $model, messages: [{role: "user", content: $prompt}]}')
+            '{model: $model, messages: [{role: "user", content: $prompt}], max_tokens: 16000}')
 
           RESPONSE=$(echo "$PAYLOAD" | curl -s --max-time 60 https://openrouter.ai/api/v1/chat/completions \
             -H "Authorization: Bearer ${{ secrets.OPENROUTER_API_KEY }}" \
@@ -201,7 +201,9 @@ jobs:
             exit 1
           fi
 
-          echo "$CONTENT" > /tmp/response.txt
+          # echo "$CONTENT" > /tmp/response.txt
+          CLEAN_CONTENT=$(echo "$CONTENT" | sed '1s/^\s*```[a-zA-Z]*//' | sed '$s/\s*```\s*$//')
+          echo "$CLEAN_CONTENT" > /tmp/response.txt
 
       - name: Parse Model Response
         id: parse
