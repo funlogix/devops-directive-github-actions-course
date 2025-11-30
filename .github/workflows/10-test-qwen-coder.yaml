@@ -258,28 +258,45 @@ jobs:
 
             # Validate files exist and OLD matches current content
             python3 - <<'PYCODE'
-          import json, os, sys
-          files = json.load(open('/tmp/files.json'))
-          for f in files:
-              path = f.get("FILE") or f.get("file")
-              old = f.get("OLD") or ""
-              new = f.get("NEW") or ""
-              if not path:
-                  sys.exit("❌ Missing FILE path in entry")
-              if not os.path.exists(path):
-                  sys.exit(f"❌ File not found: {path}")
-              current = open(path).read().rstrip()
-              if current != old.rstrip():
-                  sys.exit(f"❌ Content mismatch in {path}")
-          print(f"✅ Parsed and validated {len(files)} files")
-          PYCODE
+            import json, os, sys
+            files = json.load(open('/tmp/files.json'))
+            for f in files:
+                path = f.get("FILE") or f.get("file")
+                old = f.get("OLD") or ""
+                new = f.get("NEW") or ""
+                
+                if not path:
+                    sys.exit("❌ Missing FILE path in entry")
+                if not os.path.exists(path):
+                    sys.exit(f"❌ File not found: {path}")
+                
+                # --- CONTENT NORMALIZATION AND DEBUGGING ---
+                
+                # 1. Read and normalize content: replace Windows CRLF with Unix LF, then remove trailing newlines/spaces.
+                current = open(path).read().replace('\r\n', '\n').rstrip()
+                old_content = old.replace('\r\n', '\n').rstrip()
+                
+                if current != old_content:
+                    # 2. Add extensive debugging output on failure
+                    print(f"--- ❌ CONTENT MISMATCH IN {path} ---", file=sys.stderr)
+                    print(f"Current content length: {len(current)}, OLD content length: {len(old_content)}", file=sys.stderr)
+                    print("\n--- CURRENT CONTENT ---", file=sys.stderr)
+                    print(current, file=sys.stderr)
+                    print("\n--- OLD CONTENT FROM AI ---", file=sys.stderr)
+                    print(old_content, file=sys.stderr)
+                    print("\n-------------------------", file=sys.stderr)
+                    
+                    sys.exit(f"❌ Content mismatch in {path}")
+                
+            print(f"✅ Parsed and validated {len(files)} files")
+            PYCODE
 
-                echo "FILES_JSON<<EOF" >> "$GITHUB_ENV"
-                cat /tmp/files.json >> "$GITHUB_ENV"
-                echo "EOF" >> "$GITHUB_ENV"
+            echo "FILES_JSON<<EOF" >> "$GITHUB_ENV"
+            cat /tmp/files.json >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
 
-              else
-                echo "❌ Unknown FEASIBLE value: $FEASIBLE"
+          else
+            echo "❌ Unknown FEASIBLE value: $FEASIBLE"
             cat "$RESP"
             exit 1
           fi
