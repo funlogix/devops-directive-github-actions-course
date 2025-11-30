@@ -7,13 +7,7 @@ import json, os, sys, shutil
 # we'll rely on the calling step to pass the content.
 
 # We'll expect the calling step to write the JSON content to a temporary file,
-# or we can read it from an argument.
-
-# For simplicity, let's assume the calling shell step writes the JSON to a file named /tmp/files.json 
-# OR we rely on the SHELL to pass the environment variable content directly (which is what the old step did).
-
-# To replicate the old behavior: read the variable content from the first command-line argument (sys.argv[1])
-# NOTE: The calling shell step *must* be modified to pass ${{ env.FILES_JSON }} as an argument.
+# or we can rely on the SHELL to pass the environment variable content directly (which is what the old step did).
 
 if len(sys.argv) < 2:
     sys.exit("❌ Missing FILES_JSON argument")
@@ -30,11 +24,15 @@ if not isinstance(files, list):
     sys.exit("❌ FILES_JSON is not a list")
 
 for f in files:
-    # Ensure keys are lowercase as they are pulled from the JSON output
-    path = f.get('file')
-    new_content = f.get('new')
+    # --- CHANGE START ---
+    # Try getting the field using lowercase, but fall back to uppercase if needed.
+    # The 'or' operator works because f.get() returns None if the key doesn't exist.
+    path = f.get('file') or f.get('FILE') 
+    new_content = f.get('new') or f.get('NEW')
+    # --- CHANGE END ---
 
     if not path or new_content is None:
+        # This will catch cases where either 'file'/'FILE' or 'new'/'NEW' is missing/None
         sys.exit(f"❌ Missing required fields in entry: {f}")
 
     if not os.path.exists(path):
