@@ -45,33 +45,29 @@ jobs:
             echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
             echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
 
-            echo "ISSUE_BODY<<EOF" >> "$GITHUB_ENV"
-            echo "${{ github.event.issue.body }}" >> "$GITHUB_ENV"
-            echo "EOF" >> "$GITHUB_ENV"
-
-            echo "TEXT_INPUT<<EOF" >> "$GITHUB_ENV"
-            echo "${{ github.event.issue.body }}" >> "$GITHUB_ENV"
-            echo "EOF" >> "$GITHUB_ENV"
+            # Write raw text safely (no quoting issues)
+            printf '%s' "${{ github.event.issue.body }}" > /tmp/ISSUE_BODY.txt
+            printf '%s' "${{ github.event.issue.body }}" > /tmp/TEXT_INPUT.txt
 
           elif [ "${{ github.event_name }}" = "issue_comment" ]; then
             echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
             echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
 
-            echo "ISSUE_BODY<<EOF" >> "$GITHUB_ENV"
-            echo "${{ github.event.issue.body }}" >> "$GITHUB_ENV"
-            echo "EOF" >> "$GITHUB_ENV"
-
-            echo "TEXT_INPUT<<EOF" >> "$GITHUB_ENV"
-            echo "${{ github.event.comment.body }}" >> "$GITHUB_ENV"
-            echo "EOF" >> "$GITHUB_ENV"
+            printf '%s' "${{ github.event.issue.body }}"   > /tmp/ISSUE_BODY.txt
+            printf '%s' "${{ github.event.comment.body }}" > /tmp/TEXT_INPUT.txt
           fi
+
+          # Expose file paths as env vars for clarity
+          echo "ISSUE_BODY_PATH=/tmp/ISSUE_BODY.txt" >> "$GITHUB_ENV"
+          echo "TEXT_INPUT_PATH=/tmp/TEXT_INPUT.txt" >> "$GITHUB_ENV"
+
 
       - name: Detect Qwen Command (Dry-run vs Apply)
         run: |
-          if echo "$TEXT_INPUT" | tr -d '\r' | grep -Eiq '\[qwen[[:space:]]+apply\]'; then
+          if grep -Eiq '\[qwen[[:space:]]+apply\]' "$TEXT_INPUT_PATH"; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
-            echo "MODE=apply" >> "$GITHUB_ENV"
-          elif echo "$TEXT_INPUT" | tr -d '\r' | grep -Eiq '\[qwen[[:space:]]+dry-run\]'; then
+            echo "MODE=apply"   >> "$GITHUB_ENV"
+          elif grep -Eiq '\[qwen[[:space:]]+dry-run\]' "$TEXT_INPUT_PATH"; then
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
             echo "MODE=dry-run" >> "$GITHUB_ENV"
           else
@@ -112,7 +108,6 @@ jobs:
 
       - name: Construct Prompt
         run: |
-          # Write the template with placeholders
           cat > /tmp/prompt.txt << 'EOF'
           You are Qwen3-Coder, an expert AI developer assistant. Review the GitHub issue below and propose a minimal, safe, and concrete solution.
 
@@ -148,7 +143,8 @@ jobs:
 
           **Issue:**
           Title: "${ISSUE_TITLE}"
-          Body: "${ISSUE_BODY}"
+          Body: |
+          __ISSUE_BODY_PLACEHOLDER__
           Comments: |
           __COMMENTS_PLACEHOLDER__
 
@@ -156,15 +152,18 @@ jobs:
           __REPO_PLACEHOLDER__
           EOF
 
-          # Replace placeholders with actual file contents
+          # Insert comments and repo context
           sed -i "/__COMMENTS_PLACEHOLDER__/r /tmp/comments.txt" /tmp/prompt.txt
           sed -i "/__COMMENTS_PLACEHOLDER__/d" /tmp/prompt.txt
           sed -i "/__REPO_PLACEHOLDER__/r /tmp/repo-context.txt" /tmp/prompt.txt
           sed -i "/__REPO_PLACEHOLDER__/d" /tmp/prompt.txt
 
-          # Expand environment variables into the final prompt
-          envsubst < /tmp/prompt.txt > /tmp/final-prompt.txt
+          # Insert issue body from file (safe)
+          sed -i "/__ISSUE_BODY_PLACEHOLDER__/r $ISSUE_BODY_PATH" /tmp/prompt.txt
+          sed -i "/__ISSUE_BODY_PLACEHOLDER__/d" /tmp/prompt.txt
 
+          # Expand remaining env vars (e.g., ISSUE_TITLE, REPO)
+          envsubst < /tmp/prompt.txt > /tmp/final-prompt.txt
 
       - name: Call Qwen3-Coder via OpenRouter
         run: |
