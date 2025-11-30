@@ -40,27 +40,26 @@ jobs:
           pip3 install yq
 
       - name: Get Issue Details
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
+          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          echo "ISSUE_TITLE=$ISSUE_TITLE"   >> "$GITHUB_ENV"
+
           if [ "${{ github.event_name }}" = "issues" ]; then
-            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
-            echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
-
-            # Write raw text safely (no quoting issues)
-            printf '%s' "${{ github.event.issue.body }}" > /tmp/ISSUE_BODY.txt
-            printf '%s' "${{ github.event.issue.body }}" > /tmp/TEXT_INPUT.txt
-
+            printf '%s' "$ISSUE_BODY"   > /tmp/ISSUE_BODY.txt
+            printf '%s' "$ISSUE_BODY"   > /tmp/TEXT_INPUT.txt
           elif [ "${{ github.event_name }}" = "issue_comment" ]; then
-            echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
-            echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
-
-            printf '%s' "${{ github.event.issue.body }}"   > /tmp/ISSUE_BODY.txt
-            printf '%s' "${{ github.event.comment.body }}" > /tmp/TEXT_INPUT.txt
+            printf '%s' "$ISSUE_BODY"   > /tmp/ISSUE_BODY.txt
+            printf '%s' "$COMMENT_BODY" > /tmp/TEXT_INPUT.txt
           fi
 
-          # Expose file paths as env vars for clarity
           echo "ISSUE_BODY_PATH=/tmp/ISSUE_BODY.txt" >> "$GITHUB_ENV"
           echo "TEXT_INPUT_PATH=/tmp/TEXT_INPUT.txt" >> "$GITHUB_ENV"
-
+          
 
       - name: Detect Qwen Command (Dry-run vs Apply)
         run: |
@@ -76,6 +75,8 @@ jobs:
           fi
 
       - name: Fetch Issue Comments (last 5)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh issue view ${{ env.ISSUE_NUMBER }} --json comments \
             --jq '[.comments[-5:][] | "- **\(.author.login)**: \(.body | split("\n") | join(" "))"] | join("\n")' \

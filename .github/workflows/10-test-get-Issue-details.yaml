@@ -1,0 +1,68 @@
+name: Test Get Issue Details
+
+on:
+  workflow_dispatch:   # run manually from Actions tab
+
+jobs:
+  test-get-issue-details:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        event_name: [issues, issue_comment]
+        title:
+          - "Simple Title"
+          - "Title with (parentheses)"
+          - "Title with \"quotes\""
+          - "Title with 'apostrophes'"
+          - "Title with & ampersand"
+          - "Title with [brackets] and {braces}"
+          - "Multiline\nTitle second line"
+          - "Emoji 🚀🔥 Title"
+          - ""   # empty title edge case
+        body:
+          - "Simple body"
+          - "Body with (parentheses)"
+          - "Body with \"quotes\""
+          - "Body with 'apostrophes'"
+          - "Body with & ampersand"
+          - "Body with [brackets] and {braces}"
+          - "Multiline\nSecond line\nThird line"
+          - "Emoji 💡✨ Body"
+          - ""   # empty body edge case
+    steps:
+      - name: Show matrix input
+        run: |
+          echo "Event: ${{ matrix.event_name }}"
+          echo "Title: ${{ matrix.title }}"
+          echo "Body: ${{ matrix.body }}"
+
+      - name: Get Issue Details
+        env:
+          ISSUE_NUMBER: 1
+          ISSUE_TITLE: ${{ matrix.title }}
+          ISSUE_BODY: ${{ matrix.body }}
+          COMMENT_BODY: ${{ matrix.body }}
+          EVENT_NAME: ${{ matrix.event_name }}
+        run: |
+          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          echo "ISSUE_TITLE=$ISSUE_TITLE"   >> "$GITHUB_ENV"
+
+          if [ "$EVENT_NAME" = "issues" ]; then
+            printf '%s' "$ISSUE_BODY"   > /tmp/ISSUE_BODY.txt
+            printf '%s' "$ISSUE_BODY"   > /tmp/TEXT_INPUT.txt
+          elif [ "$EVENT_NAME" = "issue_comment" ]; then
+            printf '%s' "$ISSUE_BODY"   > /tmp/ISSUE_BODY.txt
+            printf '%s' "$COMMENT_BODY" > /tmp/TEXT_INPUT.txt
+          fi
+
+          echo "ISSUE_BODY_PATH=/tmp/ISSUE_BODY.txt" >> "$GITHUB_ENV"
+          echo "TEXT_INPUT_PATH=/tmp/TEXT_INPUT.txt" >> "$GITHUB_ENV"
+
+      - name: Verify files
+        run: |
+          echo "ISSUE_TITLE: $ISSUE_TITLE"
+          echo "ISSUE_BODY content:"
+          cat $ISSUE_BODY_PATH || echo "(empty)"
+          echo
+          echo "TEXT_INPUT content:"
+          cat $TEXT_INPUT_PATH || echo "(empty)"
