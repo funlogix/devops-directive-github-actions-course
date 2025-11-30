@@ -61,12 +61,13 @@ jobs:
             echo "EOF" >> "$GITHUB_ENV"
           fi
 
+
       - name: Detect Qwen Command (Dry-run vs Apply)
         run: |
-          if echo "$TEXT_INPUT" | grep -Eiq '\[qwen[[:space:]]+apply\]'; then
+          if echo "$TEXT_INPUT" | tr -d '\r' | grep -Eiq '\[qwen[[:space:]]+apply\]'; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
             echo "MODE=apply" >> "$GITHUB_ENV"
-          elif echo "$TEXT_INPUT" | grep -Eiq '\[qwen[[:space:]]+dry-run\]'; then
+          elif echo "$TEXT_INPUT" | tr -d '\r' | grep -Eiq '\[qwen[[:space:]]+dry-run\]'; then
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
             echo "MODE=dry-run" >> "$GITHUB_ENV"
           else
@@ -107,6 +108,7 @@ jobs:
 
       - name: Construct Prompt
         run: |
+          # Write the template with placeholders
           cat > /tmp/prompt.txt << 'EOF'
           You are Qwen3-Coder, an expert AI developer assistant. Review the GitHub issue below and propose a minimal, safe, and concrete solution.
 
@@ -144,13 +146,21 @@ jobs:
           Title: "${ISSUE_TITLE}"
           Body: "${ISSUE_BODY}"
           Comments: |
-          $(cat /tmp/comments.txt)
+          __COMMENTS_PLACEHOLDER__
 
           **Repository Context:**
-          $(cat /tmp/repo-context.txt)
+          __REPO_PLACEHOLDER__
           EOF
 
+          # Replace placeholders with actual file contents
+          sed -i "/__COMMENTS_PLACEHOLDER__/r /tmp/comments.txt" /tmp/prompt.txt
+          sed -i "/__COMMENTS_PLACEHOLDER__/d" /tmp/prompt.txt
+          sed -i "/__REPO_PLACEHOLDER__/r /tmp/repo-context.txt" /tmp/prompt.txt
+          sed -i "/__REPO_PLACEHOLDER__/d" /tmp/prompt.txt
+
+          # Expand environment variables into the final prompt
           envsubst < /tmp/prompt.txt > /tmp/final-prompt.txt
+
 
       - name: Call Qwen3-Coder via OpenRouter
         run: |
