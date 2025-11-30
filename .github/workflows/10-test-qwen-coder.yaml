@@ -45,27 +45,26 @@ jobs:
             echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
             echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
 
-          cat >> "$GITHUB_ENV" <<'ISSUE_BODY'
-${{ github.event.issue.body }}
-ISSUE_BODY
+            echo "ISSUE_BODY<<EOF" >> "$GITHUB_ENV"
+            echo "${{ github.event.issue.body }}" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
 
-          cat >> "$GITHUB_ENV" <<'TEXT_INPUT'
-${{ github.event.issue.body }}
-TEXT_INPUT
+            echo "TEXT_INPUT<<EOF" >> "$GITHUB_ENV"
+            echo "${{ github.event.issue.body }}" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
 
           elif [ "${{ github.event_name }}" = "issue_comment" ]; then
             echo "ISSUE_NUMBER=${{ github.event.issue.number }}" >> "$GITHUB_ENV"
             echo "ISSUE_TITLE=${{ github.event.issue.title }}" >> "$GITHUB_ENV"
 
-          cat >> "$GITHUB_ENV" <<'ISSUE_BODY'
-${{ github.event.issue.body }}
-ISSUE_BODY
+            echo "ISSUE_BODY<<EOF" >> "$GITHUB_ENV"
+            echo "${{ github.event.issue.body }}" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
 
-          cat >> "$GITHUB_ENV" <<'TEXT_INPUT'
-${{ github.event.comment.body }}
-TEXT_INPUT
-    fi
-
+            echo "TEXT_INPUT<<EOF" >> "$GITHUB_ENV"
+            echo "${{ github.event.comment.body }}" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+          fi
 
       - name: Detect Qwen Command (Dry-run vs Apply)
         run: |
