@@ -293,7 +293,7 @@ jobs:
           # The shell command now calls the external script, passing the JSON environment variable
           # as a single argument. The 'env.FILES_JSON' content is placed inside single quotes
           # to protect the JSON content from shell expansion issues.
-          python3 apply_changes.py '${{ env.FILES_JSON }}'
+          python3 apply_changes.py
 
       - name: Create Pull Request (Apply Mode Only)
         id: create-pull-request

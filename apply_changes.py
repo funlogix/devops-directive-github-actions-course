@@ -1,52 +1,58 @@
-import json, os, sys, shutil
+import json
+import os
+import sys
+import shutil
 
-# The FILES_JSON is passed as an environment variable to the shell,
-# which needs to be passed to the Python script somehow.
-# Since we can't easily access shell environment variables passed with '''${{ env.FILES_JSON }}''' 
-# directly in the standalone script without command-line arguments, 
-# we'll rely on the calling step to pass the content.
-
-# We'll expect the calling step to write the JSON content to a temporary file,
-# or we can rely on the SHELL to pass the environment variable content directly (which is what the old step did).
-
-if len(sys.argv) < 2:
-    sys.exit("❌ Missing FILES_JSON argument")
-
-files_json_string = sys.argv[1]
+# --- Data Loading ---
+# The script relies on the preceding workflow step writing the
+# FILES_JSON content to /tmp/files.json.
 
 try:
-    # Use json.loads to parse the string passed from the shell
-    files = json.loads(files_json_string)
+    with open('/tmp/files.json', 'r') as f_json:
+        files = json.load(f_json)
+except FileNotFoundError:
+    # This should only happen if the preceding workflow step failed to run or write the file.
+    sys.exit("❌ Error: /tmp/files.json not found. Check the 'Parse Model Response' step.")
 except Exception as e:
-    sys.exit(f"❌ Failed to parse FILES_JSON: {e}")
+    sys.exit(f"❌ Failed to parse /tmp/files.json: {e}")
 
 if not isinstance(files, list):
-    sys.exit("❌ FILES_JSON is not a list")
+    sys.exit("❌ FILES content is not a list")
 
+# --- Apply Changes ---
 for f in files:
-    # --- CHANGE START ---
-    # Try getting the field using lowercase, but fall back to uppercase if needed.
-    # The 'or' operator works because f.get() returns None if the key doesn't exist.
+    # Use case-insensitive retrieval for robustness against varying LLM/yq output.
+    # Checks for 'file' (lowercase) OR 'FILE' (uppercase).
     path = f.get('file') or f.get('FILE') 
+    
+    # Checks for 'new' (lowercase) OR 'NEW' (uppercase).
     new_content = f.get('new') or f.get('NEW')
-    # --- CHANGE END ---
 
     if not path or new_content is None:
-        # This will catch cases where either 'file'/'FILE' or 'new'/'NEW' is missing/None
-        sys.exit(f"❌ Missing required fields in entry: {f}")
+        # Exit if file path or new content is missing (most likely due to truncation or malformed JSON)
+        sys.exit(f"❌ Missing required fields (FILE/NEW) in entry: {f}")
 
     if not os.path.exists(path):
+        # Exit if the target file doesn't exist (LLM error)
         sys.exit(f"❌ Target file does not exist: {path}")
 
-    # Backup original file for safety
+    # 1. Backup original file for safety
     backup_path = path + ".bak"
-    shutil.copy(path, backup_path)
-    print(f"📦 Backed up {path} to {backup_path}")
-
-    # Write new content with UTF-8 encoding
     try:
+        shutil.copy(path, backup_path)
+        print(f"📦 Backed up {path} to {backup_path}")
+    except Exception as e:
+        sys.exit(f"❌ Failed to create backup of {path}: {e}")
+
+
+    # 2. Write new content with UTF-8 encoding
+    try:
+        # We use 'w' mode, which truncates/overwrites the file.
         with open(path, 'w', encoding='utf-8') as fp:
             fp.write(new_content)
         print(f"✅ Updated {path}")
     except Exception as e:
+        # If writing fails, exit immediately
         sys.exit(f"❌ Failed to update {path}: {e}")
+
+# Script exits successfully (exit code 0) if all changes are applied.
