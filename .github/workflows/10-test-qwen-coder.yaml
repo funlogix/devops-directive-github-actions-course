@@ -38,10 +38,14 @@ jobs:
         run: |
           sudo apt-get update -y && sudo apt-get install -y jq
           # pip3 install yq
+          # Install Go-based yq into /usr/local/bin
           YQ_VERSION=v4.40.5 
-          wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64 -O /usr/bin/yq
-          # Add 'sudo' to chmod to ensure execute permission is granted
-          sudo chmod +x /usr/bin/yq
+          
+          # Download binary using -O to specify the output path
+          sudo wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64 -O /usr/local/bin/yq
+          
+          # Ensure it is executable by everyone (using sudo is critical here)
+          sudo chmod +x /usr/local/bin/yq
 
       - name: Get Issue Details
         env:
