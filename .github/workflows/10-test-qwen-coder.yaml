@@ -257,7 +257,7 @@ jobs:
             echo "$FILES_JSON" > /tmp/files.json
 
             # Validate files exist and OLD matches current content
-            python3 - <<'PYCODE'
+          python3 - <<- 'PYCODE'  # Note the addition of the hyphen: '<<-'
             import json, os, sys
             files = json.load(open('/tmp/files.json'))
             for f in files:
@@ -287,13 +287,13 @@ jobs:
                     print("\n-------------------------", file=sys.stderr)
                     
                     sys.exit(f"❌ Content mismatch in {path}")
-                
+                    
             print(f"✅ Parsed and validated {len(files)} files")
-            PYCODE
+          PYCODE  # This line MUST be flush-left relative to the YAML content start.
 
-            echo "FILES_JSON<<EOF" >> "$GITHUB_ENV"
-            cat /tmp/files.json >> "$GITHUB_ENV"
-            echo "EOF" >> "$GITHUB_ENV"
+          echo "FILES_JSON<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/files.json >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
 
           else
             echo "❌ Unknown FEASIBLE value: $FEASIBLE"
@@ -318,7 +318,7 @@ jobs:
       - name: Apply File Changes (Feasible)
         if: env.FEASIBLE == 'true'
         run: |
-          python3 - <<'PYCODE'
+          python3 - <<- 'PYCODE'
           import json, os, sys, shutil
 
           try:
