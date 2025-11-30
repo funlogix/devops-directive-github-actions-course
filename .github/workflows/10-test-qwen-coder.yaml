@@ -25,7 +25,8 @@ jobs:
 
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      MODEL: qwen/qwen3-coder:free
+      # MODEL: qwen/qwen3-coder:free
+      MODEL: x-ai/grok-4.1-fast:free
       REPO: ${{ github.repository }}
 
     steps:
@@ -118,7 +119,7 @@ jobs:
       - name: Construct Prompt
         run: |
           cat > /tmp/prompt.txt << 'EOF'
-          You are Qwen3-Coder, an expert AI developer assistant. Review the GitHub issue below and propose a minimal, safe, and concrete solution.
+          You are Grok 4.1, an expert AI developer assistant. Review the GitHub issue below and propose a minimal, safe, and concrete solution.
 
           **Rules:**
           - Only propose changes if they are **simple, low-risk, and self-contained** (e.g., docs, config, minor fix).
